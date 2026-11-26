@@ -12,7 +12,7 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/n1xvare/STARA-UI/main
 
 **RightShift** — скрыть или показать. Круг в шапке открывает выбор цвета (HEX и RGB), луна/солнце переключает тему.
 
-Кристальные рамки, логотип и иконки — готовые PNG в `assets/`. Они отрендерены в Chromium через SVG-фильтры: specular lighting, turbulence и радужная дисперсия. При первом запуске картинки скачиваются в `workspace/STRATA/`.
+Все кристаллы (плитки колеса, вкладки, теги секций, чекбоксы, ползунки) — огранённые камни из 4 слоёв PNG в `assets/`: `*_gem` (грани в оттенках серого, красятся в акцент), `*_bevel` (стеклянные грани тёмного состояния), `*_hl` (блики) и `*_rim` (хромовая кромка с радужной дисперсией). Каждая грань освещена отдельно светом сверху-слева. Картинки отрендерены в Chromium из SVG и при первом запуске скачиваются в `workspace/STRATA/v2/`.
 
 ## API
 
@@ -21,7 +21,7 @@ local STRATA = loadstring(game:HttpGet("https://raw.githubusercontent.com/n1xvar
 local Window = STRATA:CreateWindow({ ToggleKey = Enum.KeyCode.RightShift, Mode = "Glass", Accent = nil })
 local Page = Window:Page({ Title = "Combat", Icon = "crosshair" })   -- плитка на колесе (до 5)
 local Tab  = Page:Tab({ Title = "Targets", Icon = "crosshair" })     -- вкладка в шапке (до 3 на страницу)
-local S    = Tab:Section({ Title = "Targeting", Side = "Left" })     -- Left / Right колонка
+local S    = Tab:Section({ Title = "Targeting", Side = "Left" })     -- Left / Right колонка, Caps = false — без капса
 
 S:Toggle({ Title, Default, Flag, Callback })
 S:Slider({ Title, Min, Max, Default, Increment, Suffix, Flag, Callback })

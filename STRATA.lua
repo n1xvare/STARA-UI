@@ -6,7 +6,7 @@
     Crystal frames are pre-rendered PNGs (assets/) loaded from GitHub via getcustomasset.
 ]]
 
-local STRATA = { Version = "1.0.0", Flags = {}, Options = {}, _Hooks = {} }
+local STRATA = { Version = "1.1.0", Flags = {}, Options = {}, _Hooks = {} }
 
 ------------------------------------------------------------------------ services
 local cloneref = cloneref or function(x) return x end
@@ -30,7 +30,7 @@ local function Accent() return Theme.Accent or Theme.Silver end
 local function Dark() return Theme.Mode == "Dark" end
 local function OnTheme(fn) table.insert(STRATA._Hooks, fn); fn() end
 
-local FONT = "rbxasset://fonts/families/GothamSSm.json"
+local FONT = "rbxasset://fonts/families/BuilderSans.json"
 local FW = Enum.FontWeight
 
 ------------------------------------------------------------------------ helpers
@@ -60,8 +60,14 @@ local function Btn(parent, props)
     return b
 end
 local function Measure(txt, size, bold)
-    local ok, v = pcall(function() return TextService:GetTextSize(txt, size, bold and Enum.Font.GothamBold or Enum.Font.GothamMedium, Vector2.new(1e4, 1e4)) end)
-    return ok and v or Vector2.new(#txt * size * 0.56, size)
+    local ok, v = pcall(function()
+        local p = Instance.new("GetTextBoundsParams")
+        p.Text, p.Size, p.Width, p.Font = txt, size, 1e4, Font.new(FONT, bold and FW.Bold or FW.SemiBold)
+        return TextService:GetTextBoundsAsync(p)
+    end)
+    if ok and typeof(v) == "Vector2" then return v end
+    ok, v = pcall(function() return TextService:GetTextSize(txt, size, bold and Enum.Font.ArialBold or Enum.Font.Arial, Vector2.new(1e4, 1e4)) end)
+    return ok and v or Vector2.new(#txt * size * 0.54, size)
 end
 local function SafeCall(fn, ...)
     if not fn then return end
@@ -73,7 +79,7 @@ local function IsMove(i) return i.UserInputType == Enum.UserInputType.MouseMovem
 local function Round(n, s) s = s or 1; return math.floor(n / s + 0.5) * s end
 
 ------------------------------------------------------------------------ assets
-local Assets = { BaseURL = "https://raw.githubusercontent.com/n1xvare/STARA-UI/main/assets/", Folder = "STRATA", Version = "1", Cache = {} }
+local Assets = { BaseURL = "https://raw.githubusercontent.com/n1xvare/STARA-UI/main/assets/", Folder = "STRATA", Version = "2", Cache = {} }
 STRATA.Assets = Assets
 local function Asset(name)
     if Assets.Cache[name] then return Assets.Cache[name] end
@@ -95,9 +101,10 @@ local function Asset(name)
     Assets.Cache[name] = id
     return id
 end
-local PRELOAD = { "window_frame.png", "panel_frame.png", "panel_fill.png", "tab_frame.png", "tab_fill.png", "tag_frame.png", "tag_fill.png",
-    "tile_frame.png", "tile_fill.png", "tile_dark.png", "ring.png", "check_frame.png", "check_fill.png", "knob.png", "field_frame.png",
-    "pill_frame.png", "logo_silver.png", "logo_white.png", "icons.png" }
+local PRELOAD = { "window_rim.png", "panel_rim.png", "panel_fill.png", "ring.png", "field_rim.png", "pill_rim.png", "logo_silver.png", "logo_white.png", "icons.png" }
+for _, g in ipairs({ "tab", "tag", "tile", "check", "knob" }) do
+    for _, part in ipairs({ "gem", "bevel", "hl", "rim" }) do table.insert(PRELOAD, g .. "_" .. part .. ".png") end
+end
 
 -- 9-slice image helper
 local function Slice(parent, name, sliceRect, props)
@@ -105,8 +112,43 @@ local function Slice(parent, name, sliceRect, props)
     if props then for k, v in pairs(props) do i[k] = v end end
     return i
 end
-local S_WINDOW, S_PANEL, S_TAB = Rect.new(24, 24, 104, 104), Rect.new(14, 14, 82, 82), Rect.new(12, 12, 52, 28)
-local S_TAG, S_CHECK, S_FIELD, S_PILL = Rect.new(12, 12, 60, 18), Rect.new(8, 8, 16, 16), Rect.new(9, 9, 31, 15), Rect.new(14, 13, 46, 15)
+local S_WINDOW, S_PANEL, S_TAB = Rect.new(24, 24, 104, 104), Rect.new(14, 14, 82, 82), Rect.new(16, 12, 100, 23)
+local S_TAG, S_FIELD, S_PILL = Rect.new(42, 1, 140, 28), Rect.new(9, 9, 31, 15), Rect.new(14, 13, 46, 15)
+
+-- faceted gem = 4 stacked layers rendered from the same polygon:
+--   gem   grayscale facets (tinted: accent / dark / silver)
+--   bevel white glass facets (shown on dark gems -> clear crystal edges)
+--   hl    gloss band, lit edge lines, star glints (never tinted)
+--   rim   chrome edge with rainbow dispersion (never tinted)
+local GEM_PARTS = { "gem", "bevel", "hl", "rim" }
+local function Gem(parent, name, slice, props)
+    local f = New("Frame", { BackgroundTransparency = 1, Parent = parent })
+    if props then for k, v in pairs(props) do f[k] = v end end
+    local g = { Root = f }
+    for _, part in ipairs(GEM_PARTS) do
+        local i = New("ImageLabel", { BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Image = Asset(name .. "_" .. part .. ".png"), ZIndex = f.ZIndex, Parent = f })
+        if slice then i.ScaleType = Enum.ScaleType.Slice; i.SliceCenter = slice end
+        g[part] = i
+    end
+    return g
+end
+local function GemDark() return Theme.Mode == "Dark" and rgb(6, 6, 8) or rgb(14, 15, 18) end
+-- state: "on" (accent gem), "off" (dark crystal), "hover" (dark crystal, brighter edges); soft = translucent silver when no accent
+local function GemLook(g, state, instant, soft)
+    local on = state == "on"
+    local gemT
+    if on then gemT = Theme.Accent and 0 or (soft and 0.6 or 0.5)
+    else gemT = Theme.Mode == "Dark" and 0.04 or 0.3 end
+    local props = {
+        gem = { ImageColor3 = on and (Theme.Accent or Theme.Silver) or GemDark(), ImageTransparency = gemT },
+        bevel = { ImageTransparency = on and 1 or (state == "hover" and 0.15 or 0.38) },
+        hl = { ImageTransparency = on and 0 or 0.45 },
+        rim = { ImageColor3 = on and rgb(255, 255, 255) or rgb(132, 136, 146) },
+    }
+    for k, pr in pairs(props) do
+        if instant then for a, b in pairs(pr) do g[k][a] = b end else Tween(g[k], 0.3, pr) end
+    end
+end
 
 local ICELL = 64
 local IconMap = {["crosshair"]={0,0}, ["pointer"]={1,0}, ["filter"]={2,0}, ["eye"]={3,0}, ["run"]={4,0}, ["sliders"]={5,0}, ["configs"]={6,0}, ["moon"]={7,0}, ["sun"]={0,1}, ["chevron"]={1,1}, ["check"]={2,1}, ["user"]={3,1}, ["globe"]={4,1}, ["brush"]={5,1}, ["keyboard"]={6,1}, ["x"]={7,1}, ["shield"]={0,2}, ["bolt"]={1,2}, ["save"]={2,2}, ["folder"]={3,2}}
@@ -163,7 +205,7 @@ local L = {
     W = 840, H = 550,
     HeaderH = 58,
     TabX = 214, TabY = 13, TabW = 116, TabH = 35, TabGap = 9,
-    ArcCX = -177, ArcCY = 297, TileR = 244.7, TileStep = 18,
+    ArcCX = -177, ArcCY = 297, TileR = 258, TileStep = 18, TileW = 86, TileH = 90,
     LeftX = 141, LeftW = 335, RightX = 489, RightW = 329, ColTop = 73, ColBottom = 517,
     RowPad = 23, RowRight = 18,
 }
@@ -214,7 +256,7 @@ function STRATA:CreateWindow(o)
     self.Body = New("Frame", { Name = "Body", Position = UDim2.fromOffset(4, 4), Size = UDim2.new(1, -8, 1, -8), BorderSizePixel = 0, Parent = main })
     Corner(self.Body, 13)
     OnTheme(function()
-        Tween(self.Body, 0.35, { BackgroundColor3 = Dark() and rgb(5, 5, 7) or rgb(22, 23, 26), BackgroundTransparency = Dark() and 0.04 or 0.38 })
+        Tween(self.Body, 0.35, { BackgroundColor3 = Dark() and rgb(5, 5, 7) or rgb(22, 23, 26), BackgroundTransparency = Dark() and 0.04 or 0.62 })
     end)
     -- header band
     self.HeaderBand = New("Frame", { Name = "Header", Size = UDim2.new(1, 0, 0, L.HeaderH), BackgroundColor3 = rgb(0, 0, 0), BorderSizePixel = 0, Parent = main })
@@ -223,8 +265,8 @@ function STRATA:CreateWindow(o)
         BorderSizePixel = 0, Parent = main })
 
     -- logo (silver / tinted)
-    self.LogoSilver = New("ImageLabel", { BackgroundTransparency = 1, Position = UDim2.fromOffset(25, 15), Size = UDim2.fromOffset(165, 30), Image = Asset("logo_silver.png"), Parent = main })
-    self.LogoTint = New("ImageLabel", { BackgroundTransparency = 1, Position = UDim2.fromOffset(25, 15), Size = UDim2.fromOffset(165, 30), Image = Asset("logo_white.png"), ImageTransparency = 1, Parent = main })
+    self.LogoSilver = New("ImageLabel", { BackgroundTransparency = 1, Position = UDim2.fromOffset(21, 14), Size = UDim2.fromOffset(170, 30), Image = Asset("logo_silver.png"), Parent = main })
+    self.LogoTint = New("ImageLabel", { BackgroundTransparency = 1, Position = UDim2.fromOffset(21, 14), Size = UDim2.fromOffset(170, 30), Image = Asset("logo_white.png"), ImageTransparency = 1, Parent = main })
     OnTheme(function()
         local c = Theme.Accent
         Tween(self.LogoSilver, 0.35, { ImageTransparency = c and 1 or 0 })
@@ -239,8 +281,8 @@ function STRATA:CreateWindow(o)
     self.Content = New("Frame", { Name = "Content", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Parent = main })
 
     -- crystal window frame + shimmer sweep
-    self.Frame = Slice(main, "window_frame.png", S_WINDOW, { Name = "Crystal", Size = UDim2.fromScale(1, 1), ZIndex = 5 })
-    self.Shine = Slice(main, "window_frame.png", S_WINDOW, { Name = "Shine", Size = UDim2.fromScale(1, 1), ZIndex = 6, ImageColor3 = rgb(255, 255, 255) })
+    self.Frame = Slice(main, "window_rim.png", S_WINDOW, { Name = "Crystal", Size = UDim2.fromScale(1, 1), ZIndex = 5 })
+    self.Shine = Slice(main, "window_rim.png", S_WINDOW, { Name = "Shine", Size = UDim2.fromScale(1, 1), ZIndex = 6, ImageColor3 = rgb(255, 255, 255) })
     self.ShineGrad = New("UIGradient", { Rotation = 25, Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.42, 1),
         NumberSequenceKeypoint.new(0.5, 0.1), NumberSequenceKeypoint.new(0.58, 1), NumberSequenceKeypoint.new(1, 1) }), Offset = Vector2.new(-1, 0), Parent = self.Shine })
 
@@ -307,7 +349,7 @@ function Window:_BuildTopRight()
     local cb = New("TextButton", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(731, 30), Size = UDim2.fromOffset(28, 28), BackgroundColor3 = rgb(0, 0, 0),
         BackgroundTransparency = 0.4, Text = "", AutoButtonColor = false, ZIndex = 3, Parent = main })
     Corner(cb, 14)
-    Slice(cb, "pill_frame.png", S_PILL, { Size = UDim2.fromScale(1, 1), ZIndex = 4 })
+    Slice(cb, "pill_rim.png", S_PILL, { Size = UDim2.fromScale(1, 1), ZIndex = 4 })
     local dot = New("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(18, 18), ZIndex = 4, Parent = cb })
     Corner(dot, 9)
     OnTheme(function() Tween(dot, 0.3, { BackgroundColor3 = Theme.Accent or rgb(255, 255, 255) }) end)
@@ -315,7 +357,7 @@ function Window:_BuildTopRight()
 
     local pill = New("Frame", { Position = UDim2.fromOffset(758, 16), Size = UDim2.fromOffset(58, 27), BackgroundColor3 = rgb(0, 0, 0), BackgroundTransparency = 0.45, ZIndex = 3, Parent = main })
     Corner(pill, 13)
-    Slice(pill, "pill_frame.png", S_PILL, { Size = UDim2.fromScale(1, 1), ZIndex = 4 })
+    Slice(pill, "pill_rim.png", S_PILL, { Size = UDim2.fromScale(1, 1), ZIndex = 4 })
     local knob = New("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.fromOffset(21, 21), BackgroundColor3 = rgb(255, 255, 255), BackgroundTransparency = 0.8, ZIndex = 4, Parent = pill })
     Corner(knob, 11)
     local moon = Icon(pill, "moon", 12, Theme.Text, { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(16, 13.5), ZIndex = 5 })
@@ -341,39 +383,43 @@ function Window:_BuildWheel()
 end
 
 function Window:_PlaceTiles()
-    local n = #self.Pages
     local span = L.TileStep * 5
     for i, p in ipairs(self.Pages) do
         local a = (i - 3) * L.TileStep + self.WheelRot.Value * L.TileStep
         a = ((a + span / 2) % span) - span / 2
         local rad = math.rad(a)
         local cx, cy = L.ArcCX + L.TileR * math.cos(rad), L.ArcCY + L.TileR * math.sin(rad)
-        p.TileFrame.Position = UDim2.fromOffset(cx, cy); p.TileFrame.Rotation = a
-        p.TileFill.Position = UDim2.fromOffset(cx, cy); p.TileFill.Rotation = a
-        p.TileBack.Position = UDim2.fromOffset(cx, cy); p.TileBack.Rotation = a
-        local lx, ly = L.ArcCX + (L.TileR + 14) * math.cos(rad), L.ArcCY + (L.TileR + 14) * math.sin(rad)
-        p.TileLabel.Position = UDim2.fromOffset(lx, ly)
-        local fade = math.clamp((math.abs(a) - 37) / 8, 0, 1)
-        p.TileFade = fade
-        p.TileFrame.ImageTransparency = fade
-        p.TileBack.ImageTransparency = math.max(fade, p.BackT or 0.5)
-        p.TileFill.ImageTransparency = math.max(fade, p.FillT or 1)
-        p.TileLabel.GroupTransparency = fade
+        for _, l in pairs(p.Tile) do l.Position = UDim2.fromOffset(cx, cy); l.Rotation = a end
+        p.TileLabel.Position = UDim2.fromOffset(cx, cy)
+        p.TileFade = math.clamp((math.abs(a) - 37) / 8, 0, 1)
+        self:_TileApply(p)
     end
+end
+
+-- one tile = dark crystal (bevel visible) <-> accent gem, blended by p.Act (0..1); active tile also grows out of the ring
+function Window:_TileApply(p)
+    local a, fade, hov = p.Act.Value, p.TileFade or 0, p.Hover and 1 or 0
+    local function T(x) return math.max(fade, x) end
+    local offT = Dark() and 0.04 or 0.3
+    local onT = Theme.Accent and 0 or 0.5
+    local g = p.Tile
+    g.gem.ImageColor3 = GemDark():Lerp(Accent(), a)
+    g.gem.ImageTransparency = T(offT + (onT - offT) * a)
+    g.bevel.ImageTransparency = T(0.18 - 0.12 * hov + 0.82 * a)
+    g.hl.ImageTransparency = T(0.45 * (1 - a))
+    g.rim.ImageTransparency = fade
+    g.rim.ImageColor3 = rgb(185, 189, 198):Lerp(rgb(255, 255, 255), a)
+    local s = 1 + 0.1 * a
+    for _, l in pairs(g) do l.Size = UDim2.fromOffset(L.TileW * s, L.TileH * s); l.ZIndex = a > 0.01 and 2 or 1 end
+    p.TileLabel.GroupTransparency = fade
+    p.TileText.TextColor3 = Theme.Text
+    p.TileIcon.ImageColor3 = Theme.Text
 end
 
 function Window:_TileStyle(p, active, instant)
     p.Active = active
-    local t = instant and 0 or 0.35
-    local fillT = active and (Theme.Accent and 0.08 or 0.25) or 1
-    local backT = Dark() and 0.2 or 0.45
-    local fv = New("NumberValue", { Value = p.FillT or 1 })
-    fv.Changed:Connect(function(v) p.FillT = v; p.TileFill.ImageTransparency = math.max(p.TileFade or 0, v) end)
-    if t == 0 then fv.Value = fillT else Tween(fv, t, { Value = fillT }) end
-    p.BackT = backT
-    p.TileBack.ImageColor3 = Dark() and rgb(0, 0, 0) or rgb(10, 11, 13)
-    p.TileFill.ImageColor3 = Accent()
-    task.delay(t + 0.05, function() fv:Destroy() end)
+    if instant then p.Act.Value = active and 1 or 0 else Tween(p.Act, 0.45, { Value = active and 1 or 0 }, Enum.EasingStyle.Back) end
+    self:_TileApply(p)
 end
 
 ------------------------------------------------------------------------ pages / tabs
@@ -383,19 +429,22 @@ function Window:Page(o)
     table.insert(self.Pages, p)
     p.Index = #self.Pages
     -- tile parts (back, fill, frame) + horizontal label
-    p.TileBack = New("ImageLabel", { BackgroundTransparency = 1, AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.fromOffset(86, 92), Image = Asset("tile_dark.png"),
-        ImageColor3 = rgb(0, 0, 0), ImageTransparency = 0.5, Parent = self.Wheel })
-    p.TileFill = New("ImageLabel", { BackgroundTransparency = 1, AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.fromOffset(86, 92), Image = Asset("tile_fill.png"),
-        ImageTransparency = 1, Parent = self.Wheel })
-    p.TileFrame = New("ImageLabel", { BackgroundTransparency = 1, AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.fromOffset(86, 92), Image = Asset("tile_frame.png"), Parent = self.Wheel })
-    p.TileLabel = New("CanvasGroup", { BackgroundTransparency = 1, AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.fromOffset(76, 44), Parent = self.Wheel })
-    p.TileIcon = Icon(p.TileLabel, p.IconName, 17, Theme.Text, { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 2) })
-    p.TileText = Text(p.TileLabel, p.Title, 11, Theme.Text, FW.Medium, { Position = UDim2.fromOffset(0, 22), Size = UDim2.new(1, 0, 0, 16), TextXAlignment = Enum.TextXAlignment.Center })
-    local hit = Btn(p.TileLabel, { Size = UDim2.fromScale(1, 1) })
+    p.Tile = {}
+    for _, part in ipairs(GEM_PARTS) do
+        p.Tile[part] = New("ImageLabel", { Name = "Tile_" .. part, BackgroundTransparency = 1, AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.fromOffset(L.TileW, L.TileH),
+            Image = Asset("tile_" .. part .. ".png"), Parent = self.Wheel })
+    end
+    p.Act = New("NumberValue", { Value = 0 })
+    p.Act.Changed:Connect(function() self:_TileApply(p) end)
+    p.TileLabel = New("CanvasGroup", { BackgroundTransparency = 1, AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.fromOffset(76, 44), ZIndex = 3, Parent = self.Wheel })
+    p.TileIcon = Icon(p.TileLabel, p.IconName, 18, Theme.Text, { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 1), ZIndex = 3 })
+    p.TileText = Text(p.TileLabel, p.Title, 11, Theme.Text, FW.Bold, { Position = UDim2.fromOffset(0, 22), Size = UDim2.new(1, 0, 0, 16), TextXAlignment = Enum.TextXAlignment.Center, ZIndex = 3 })
+    New("UIStroke", { Color = rgb(0, 0, 0), Transparency = 0.55, Thickness = 1, Parent = p.TileText })
+    local hit = Btn(p.TileLabel, { Size = UDim2.fromScale(1, 1), ZIndex = 4 })
     hit.MouseButton1Click:Connect(function() self:SelectPage(p) end)
-    hit.MouseEnter:Connect(function() if not p.Active then Tween(p.TileText, 0.2, { TextColor3 = rgb(255, 255, 255) }); p.TileBack.ImageColor3 = rgb(40, 41, 46) end end)
-    hit.MouseLeave:Connect(function() if not p.Active then Tween(p.TileText, 0.2, { TextColor3 = Theme.Text }); p.TileBack.ImageColor3 = Dark() and rgb(0, 0, 0) or rgb(10, 11, 13) end end)
-    OnTheme(function() self:_TileStyle(p, p.Active == true) end)
+    hit.MouseEnter:Connect(function() p.Hover = true; self:_TileApply(p) end)
+    hit.MouseLeave:Connect(function() p.Hover = false; self:_TileApply(p) end)
+    OnTheme(function() self:_TileStyle(p, p.Active == true, true) end)
     -- this page's tab buttons (3 per page in the header)
     p.TabGroup = New("CanvasGroup", { Name = "Tabs_" .. p.Title, BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Visible = false, Parent = self.TabBar })
     self:_PlaceTiles()
@@ -413,16 +462,15 @@ function Page:Tab(o)
     local x = L.TabX + (t.Index - 1) * (L.TabW + L.TabGap)
     local b = New("TextButton", { Position = UDim2.fromOffset(x, L.TabY), Size = UDim2.fromOffset(L.TabW, L.TabH), BackgroundTransparency = 1, Text = "", AutoButtonColor = false,
         ZIndex = 3, Parent = self.TabGroup })
-    t.Back = Slice(b, "tab_fill.png", S_TAB, { Size = UDim2.fromScale(1, 1), ImageColor3 = rgb(0, 0, 0), ImageTransparency = 0.45, ZIndex = 3 })
-    t.Fill = Slice(b, "tab_fill.png", S_TAB, { Size = UDim2.fromScale(1, 1), ImageTransparency = 1, ZIndex = 3 })
-    Slice(b, "tab_frame.png", S_TAB, { Size = UDim2.fromScale(1, 1), ZIndex = 4 })
-    local tw = Measure(t.Title, 12).X
-    local ic = Icon(b, t.IconName, 12, Theme.Text, { AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0.5, -(tw + 18) / 2, 0.5, 0), ZIndex = 5 })
-    t.Label = Text(b, t.Title, 12, Theme.Text, FW.Medium, { Position = UDim2.new(0.5, -(tw + 18) / 2 + 18, 0, 0), Size = UDim2.new(0, tw + 4, 1, 0), ZIndex = 5 })
+    t.Gem = Gem(b, "tab", S_TAB, { Size = UDim2.fromScale(1, 1), ZIndex = 3 })
+    local tw = Measure(t.Title, 13).X
+    local ic = Icon(b, t.IconName, 14, Theme.Text, { AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0.5, -(tw + 22) / 2, 0.5, 0), ZIndex = 5 })
+    t.Label = Text(b, t.Title, 13, Theme.Text, FW.SemiBold, { Position = UDim2.new(0.5, -(tw + 22) / 2 + 22, 0, 0), Size = UDim2.new(0, tw + 4, 1, 0), ZIndex = 5 })
+    New("UIStroke", { Color = rgb(0, 0, 0), Transparency = 0.6, Thickness = 1, Parent = t.Label })
     t.Button, t.IconImg = b, ic
     b.MouseButton1Click:Connect(function() self:SelectTab(t) end)
-    b.MouseEnter:Connect(function() if self.CurrentTab ~= t then Tween(t.Back, 0.2, { ImageTransparency = 0.25 }) end end)
-    b.MouseLeave:Connect(function() if self.CurrentTab ~= t then Tween(t.Back, 0.2, { ImageTransparency = Dark() and 0.2 or 0.45 }) end end)
+    b.MouseEnter:Connect(function() if self.CurrentTab ~= t then GemLook(t.Gem, "hover") end end)
+    b.MouseLeave:Connect(function() if self.CurrentTab ~= t then GemLook(t.Gem, "off") end end)
     OnTheme(function() t:_Style(self.CurrentTab == t, true) end)
     -- content: two scrolling columns
     t.Root = New("CanvasGroup", { Name = "Tab_" .. self.Title .. "_" .. t.Title, BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Visible = false, Parent = w.Content })
@@ -442,19 +490,9 @@ function Page:Tab(o)
 end
 
 function Tab:_Style(active, instant)
-    local t = instant and 0 or 0.3
-    local accent = Accent()
-    if t == 0 then
-        self.Fill.ImageTransparency = active and (Theme.Accent and 0.05 or 0.3) or 1
-        self.Fill.ImageColor3 = accent
-    else
-        Tween(self.Fill, t, { ImageTransparency = active and (Theme.Accent and 0.05 or 0.3) or 1, ImageColor3 = accent })
-    end
-    self.Back.ImageTransparency = Dark() and 0.2 or 0.45
-    self.Back.ImageColor3 = Dark() and rgb(0, 0, 0) or rgb(20, 21, 24)
-    local onLight = active and not Theme.Accent and not Dark()
-    self.Label.TextColor3 = onLight and rgb(30, 31, 35) or Theme.Text
-    self.IconImg.ImageColor3 = onLight and rgb(30, 31, 35) or Theme.Text
+    GemLook(self.Gem, active and "on" or "off", instant)
+    self.Label.TextColor3 = Theme.Text
+    self.IconImg.ImageColor3 = Theme.Text
 end
 
 function Page:SelectTab(t, instant)
@@ -533,18 +571,24 @@ function Tab:Section(o)
     local parent = side == "Left" and self.Left or self.Right
     s.Root = New("Frame", { Name = "Section_" .. s.Title, BackgroundTransparency = 1, Position = UDim2.fromOffset(4, 4), Size = UDim2.fromOffset(width, 100), Parent = parent })
     s.Fill = Slice(s.Root, "panel_fill.png", S_PANEL, { Position = UDim2.fromOffset(0, 6), Size = UDim2.new(1, 0, 1, -6), ImageColor3 = rgb(0, 0, 0) })
-    s.FrameImg = Slice(s.Root, "panel_frame.png", S_PANEL, { Position = UDim2.fromOffset(0, 6), Size = UDim2.new(1, 0, 1, -6), ZIndex = 2 })
-    -- slanted tag
-    local tw = Measure(string.upper(s.Title), 13, true).X
-    local tagW = math.max(150, tw + 78)
-    s.TagBack = Slice(s.Root, "tag_fill.png", S_TAG, { Position = UDim2.fromOffset(2, 0), Size = UDim2.fromOffset(tagW, 29), ImageColor3 = rgb(0, 0, 0), ImageTransparency = 0.3, ZIndex = 3 })
-    s.TagFill = Slice(s.Root, "tag_fill.png", S_TAG, { Position = UDim2.fromOffset(2, 0), Size = UDim2.fromOffset(tagW, 29), ZIndex = 3 })
-    Slice(s.Root, "tag_frame.png", S_TAG, { Position = UDim2.fromOffset(2, 0), Size = UDim2.fromOffset(tagW, 29), ZIndex = 4 })
-    s.TagText = Text(s.Root, string.upper(s.Title), 13, Theme.Text, FW.Bold, { Position = UDim2.fromOffset(28, 0), Size = UDim2.fromOffset(tagW - 40, 29), ZIndex = 5 })
-    New("UIStroke", { Color = rgb(0, 0, 0), Transparency = 0.6, Thickness = 1, Parent = s.TagText })
+    -- header strip right of the tag: steel band + facet line (sits under the frame)
+    s.Caption = o.Caps == false and s.Title or string.upper(s.Title)
+    local tw = Measure(s.Caption, 14, true).X
+    local tagW = math.max(150, tw + 80)
+    local strip = New("Frame", { Name = "Strip", Position = UDim2.fromOffset(tagW - 24, 7), Size = UDim2.new(1, -(tagW - 24) - 3, 0, 22), BackgroundColor3 = rgb(52, 55, 62),
+        BackgroundTransparency = 0.5, BorderSizePixel = 0, Parent = s.Root })
+    New("UIGradient", { Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.15), NumberSequenceKeypoint.new(0.6, 0.55), NumberSequenceKeypoint.new(1, 0.35) }), Parent = strip })
+    New("Frame", { Position = UDim2.new(0, 0, 1, 0), Size = UDim2.new(1, 0, 0, 1), BackgroundColor3 = rgb(160, 166, 178), BackgroundTransparency = 0.55, BorderSizePixel = 0, Parent = strip })
+    New("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(1, -62, 0.5, 0), Size = UDim2.fromOffset(62, 1), Rotation = -19, BackgroundColor3 = rgb(200, 205, 215),
+        BackgroundTransparency = 0.6, BorderSizePixel = 0, Parent = strip })
+    s.FrameImg = Slice(s.Root, "panel_rim.png", S_PANEL, { Position = UDim2.fromOffset(0, 6), Size = UDim2.new(1, 0, 1, -6), ZIndex = 2 })
+    -- slanted gem tag
+    s.Tag = Gem(s.Root, "tag", S_TAG, { Position = UDim2.fromOffset(1, 0), Size = UDim2.fromOffset(tagW, 29), ZIndex = 3 })
+    s.TagText = Text(s.Root, s.Caption, 14, Theme.Text, FW.SemiBold, { Position = UDim2.fromOffset(26, 0), Size = UDim2.fromOffset(tagW - 40, 29), ZIndex = 5 })
+    New("UIStroke", { Color = rgb(0, 0, 0), Transparency = 0.5, Thickness = 1, Parent = s.TagText })
     OnTheme(function()
-        Tween(s.Fill, 0.35, { ImageTransparency = Dark() and 0.15 or 0.3 })
-        Tween(s.TagFill, 0.35, { ImageColor3 = Accent(), ImageTransparency = Theme.Accent and 0.1 or 0.62 })
+        Tween(s.Fill, 0.35, { ImageTransparency = Dark() and 0.12 or 0.5 })
+        GemLook(s.Tag, "on", false, true)
         s.TagText.TextColor3 = Theme.Text
     end)
     s.Body = New("Frame", { BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 40), Size = UDim2.new(1, 0, 0, 10), ZIndex = 3, Parent = s.Root })
@@ -591,24 +635,19 @@ function Section:Toggle(o)
     o = o or {}
     local r = self:_Row(26)
     r.Value = o.Default == true
-    Text(r.Frame, o.Title or "Toggle", 12, Theme.Text, FW.Medium, { Size = UDim2.new(1, -40, 1, 0), ZIndex = 3 })
+    Text(r.Frame, o.Title or "Toggle", 12, Theme.Text, FW.SemiBold, { Size = UDim2.new(1, -40, 1, 0), ZIndex = 3 })
     local box = New("Frame", { AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, 2, 0.5, 0), Size = UDim2.fromOffset(22, 22), BackgroundTransparency = 1, ZIndex = 3, Parent = r.Frame })
-    local back = New("Frame", { Position = UDim2.fromOffset(2, 2), Size = UDim2.fromOffset(18, 18), BackgroundColor3 = rgb(0, 0, 0), BackgroundTransparency = 0.35, ZIndex = 3, Parent = box })
-    Corner(back, 4)
-    local fill = New("ImageLabel", { BackgroundTransparency = 1, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(20, 20),
-        Image = Asset("check_fill.png"), ImageTransparency = r.Value and 0 or 1, ZIndex = 4, Parent = box })
-    local sc = New("UIScale", { Parent = fill })
-    New("ImageLabel", { BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Image = Asset("check_frame.png"), ZIndex = 5, Parent = box })
-    local tick = Icon(box, "check", 12, rgb(255, 255, 255), { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), ImageTransparency = r.Value and 0 or 1, ZIndex = 6 })
-    local function style()
-        fill.ImageColor3 = Accent()
-        tick.ImageColor3 = (not Theme.Accent and not Dark()) and rgb(40, 42, 48) or rgb(255, 255, 255)
-        back.BackgroundTransparency = Dark() and 0.1 or 0.35
+    local gem = Gem(box, "check", nil, { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(22, 22), ZIndex = 4 })
+    local sc = New("UIScale", { Parent = gem.Root })
+    local tick = Icon(box, "check", 13, rgb(255, 255, 255), { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), ImageTransparency = r.Value and 0 or 1, ZIndex = 6 })
+    local function style(instant)
+        GemLook(gem, r.Value and "on" or "off", instant)
+        tick.ImageColor3 = rgb(255, 255, 255)
     end
-    OnTheme(style)
+    OnTheme(function() style(true) end)
     function r:Set(v, silent)
         r.Value = v == true
-        Tween(fill, 0.2, { ImageTransparency = r.Value and (Theme.Accent and 0 or 0.15) or 1 })
+        style(false)
         Tween(tick, 0.2, { ImageTransparency = r.Value and 0 or 1 })
         sc.Scale = 0.6
         Tween(sc, 0.45, { Scale = 1 }, Enum.EasingStyle.Back)
@@ -629,7 +668,7 @@ function Section:Slider(o)
     local r = self:_Row(39)
     local min, max, step = o.Min or 0, o.Max or 100, o.Increment or 1
     r.Value = math.clamp(o.Default or min, min, max)
-    Text(r.Frame, o.Title or "Slider", 12, Theme.Text, FW.Medium, { Size = UDim2.new(1, -70, 0, 20), ZIndex = 3 })
+    Text(r.Frame, o.Title or "Slider", 12, Theme.Text, FW.SemiBold, { Size = UDim2.new(1, -70, 0, 20), ZIndex = 3 })
     local val = Text(r.Frame, "", 11, Theme.Text, FW.Medium, { AnchorPoint = Vector2.new(1, 0), Position = UDim2.fromScale(1, 0), Size = UDim2.fromOffset(80, 20),
         TextXAlignment = Enum.TextXAlignment.Right, ZIndex = 3 })
     local track = New("Frame", { Position = UDim2.fromOffset(0, 24), Size = UDim2.new(1, 0, 0, 3), BackgroundColor3 = rgb(255, 255, 255), BackgroundTransparency = 0.78, ZIndex = 3, Parent = r.Frame })
@@ -637,11 +676,12 @@ function Section:Slider(o)
     local fill = New("Frame", { Size = UDim2.fromScale(0, 1), ZIndex = 3, Parent = track })
     Corner(fill, 2)
     local glow = New("UIStroke", { Thickness = 1.5, Transparency = 0.6, Parent = fill })
-    local knob = New("ImageLabel", { BackgroundTransparency = 1, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0, 0.5), Size = UDim2.fromOffset(22, 13),
-        Image = Asset("knob.png"), ZIndex = 4, Parent = track })
+    local kg = Gem(track, "knob", nil, { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0, 0.5), Size = UDim2.fromOffset(23, 14), ZIndex = 4 })
+    local knob = kg.Root
     OnTheme(function()
         local c = Accent()
-        fill.BackgroundColor3 = c; glow.Color = c; knob.ImageColor3 = Theme.Accent and Theme.Accent:Lerp(rgb(255, 255, 255), 0.25) or rgb(255, 255, 255)
+        fill.BackgroundColor3 = c:Lerp(rgb(255, 255, 255), 0.15); glow.Color = c
+        GemLook(kg, "on", true)
     end)
     local function fmt(v)
         if o.Format then return o.Format(v) end
@@ -662,10 +702,10 @@ function Section:Slider(o)
     local hit = Btn(r.Frame, { Position = UDim2.fromOffset(-6, 14), Size = UDim2.new(1, 12, 0, 22), ZIndex = 7 })
     local dragging = false
     local function upd(x) r:Set(min + (max - min) * math.clamp((x - track.AbsolutePosition.X) / math.max(1, track.AbsoluteSize.X), 0, 1)) end
-    hit.InputBegan:Connect(function(i) if IsClick(i) then dragging = true; Tween(knob, 0.15, { Size = UDim2.fromOffset(26, 15) }); upd(i.Position.X) end end)
+    hit.InputBegan:Connect(function(i) if IsClick(i) then dragging = true; Tween(knob, 0.15, { Size = UDim2.fromOffset(27, 16) }); upd(i.Position.X) end end)
     table.insert(self.Window.Connections, UserInputService.InputChanged:Connect(function(i) if dragging and IsMove(i) then upd(i.Position.X) end end))
     table.insert(self.Window.Connections, UserInputService.InputEnded:Connect(function(i)
-        if dragging and IsClick(i) then dragging = false; Tween(knob, 0.25, { Size = UDim2.fromOffset(22, 13) }, Enum.EasingStyle.Back) end
+        if dragging and IsClick(i) then dragging = false; Tween(knob, 0.25, { Size = UDim2.fromOffset(23, 14) }, Enum.EasingStyle.Back) end
     end))
     r:Set(r.Value, true, true)
     Register(r, o.Flag, r.Value)
@@ -678,7 +718,7 @@ local function Field(parent, width, height, chevron)
         BackgroundTransparency = 0.35, Text = "", AutoButtonColor = false, ZIndex = 3, Parent = parent })
     Corner(f, 6)
     New("UIGradient", { Rotation = 90, Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.1), NumberSequenceKeypoint.new(1, 0.5) }), Parent = f })
-    Slice(f, chevron == "pill" and "pill_frame.png" or "field_frame.png", chevron == "pill" and S_PILL or S_FIELD, { Size = UDim2.fromScale(1, 1), ZIndex = 5 })
+    Slice(f, chevron == "pill" and "pill_rim.png" or "field_rim.png", chevron == "pill" and S_PILL or S_FIELD, { Size = UDim2.fromScale(1, 1), ZIndex = 5 })
     local t = Text(f, "", 10, Theme.Text, FW.Medium, { Position = UDim2.fromOffset(10, 0), Size = UDim2.new(1, chevron == true and -34 or -20, 1, 0), ZIndex = 4,
         TextTruncate = Enum.TextTruncate.AtEnd, TextXAlignment = chevron == "pill" and Enum.TextXAlignment.Center or Enum.TextXAlignment.Left })
     local chev
@@ -700,7 +740,7 @@ function Section:Dropdown(o)
     local opts = o.Options or {}
     r.Multi = o.Multi
     if r.Multi then r.Value = {}; for _, v in ipairs(o.Default or {}) do r.Value[v] = true end else r.Value = o.Default or (opts[1] and OptText(opts[1])) or "" end
-    Text(r.Frame, o.Title or "Dropdown", 12, Theme.Text, FW.Medium, { Size = UDim2.new(1, -130, 1, 0), ZIndex = 3 })
+    Text(r.Frame, o.Title or "Dropdown", 12, Theme.Text, FW.SemiBold, { Size = UDim2.new(1, -130, 1, 0), ZIndex = 3 })
     local f, t, chev = Field(r.Frame, o.Width or 119, 21, true)
     function r:Get()
         if not r.Multi then return r.Value end
@@ -725,7 +765,7 @@ function Section:Dropdown(o)
             BackgroundTransparency = 0.05, GroupTransparency = 1, ZIndex = 5, Parent = w.Overlay })
         New("UIScale", { Scale = scale, Parent = pop })
         Corner(pop, 6)
-        Slice(pop, "field_frame.png", S_FIELD, { Size = UDim2.fromScale(1, 1), ZIndex = 9 })
+        Slice(pop, "field_rim.png", S_FIELD, { Size = UDim2.fromScale(1, 1), ZIndex = 9 })
         local list = New("ScrollingFrame", { BackgroundTransparency = 1, BorderSizePixel = 0, Position = UDim2.fromOffset(0, 4), Size = UDim2.new(1, 0, 1, -8),
             CanvasSize = UDim2.fromOffset(0, #opts * 22), ScrollBarThickness = 0, ZIndex = 6, Parent = pop })
         local rows = {}
@@ -771,7 +811,7 @@ function Section:Keybind(o)
     o = o or {}
     local r = self:_Row(27)
     r.Key, r.Mode, r.State = o.Default, o.Mode or "Toggle", false
-    Text(r.Frame, o.Title or "Keybind", 12, Theme.Text, FW.Medium, { Size = UDim2.new(1, -110, 1, 0), ZIndex = 3 })
+    Text(r.Frame, o.Title or "Keybind", 12, Theme.Text, FW.SemiBold, { Size = UDim2.new(1, -110, 1, 0), ZIndex = 3 })
     local f, t = Field(r.Frame, 93, 21, "pill")
     t.Text = KeyName(r.Key)
     local listening = false
@@ -804,11 +844,11 @@ function Section:ColorPicker(o)
     local w = self.Window
     local r = self:_Row(26)
     r.Value = o.Default or rgb(30, 144, 255)
-    Text(r.Frame, o.Title or "Color", 12, Theme.Text, FW.Medium, { Size = UDim2.new(1, -40, 1, 0), ZIndex = 3 })
+    Text(r.Frame, o.Title or "Color", 12, Theme.Text, FW.SemiBold, { Size = UDim2.new(1, -40, 1, 0), ZIndex = 3 })
     local holder = New("TextButton", { AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, 2, 0.5, 0), Size = UDim2.fromOffset(o.Pill and 40 or 22, 22), BackgroundColor3 = rgb(0, 0, 0),
         BackgroundTransparency = 0.4, Text = "", AutoButtonColor = false, ZIndex = 3, Parent = r.Frame })
     Corner(holder, 11)
-    Slice(holder, "pill_frame.png", S_PILL, { Size = UDim2.fromScale(1, 1), ZIndex = 5 })
+    Slice(holder, "pill_rim.png", S_PILL, { Size = UDim2.fromScale(1, 1), ZIndex = 5 })
     local dot = New("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(14, 14), BackgroundColor3 = r.Value, ZIndex = 4, Parent = holder })
     Corner(dot, 7)
     New("UIStroke", { Color = r.Value, Thickness = 2, Transparency = 0.5, Parent = dot })
@@ -828,16 +868,16 @@ function Section:Button(o)
     o = o or {}
     local r = self:_Row(32)
     local b = New("TextButton", { Position = UDim2.fromOffset(0, 3), Size = UDim2.new(1, 0, 0, 26), BackgroundTransparency = 1, Text = "", AutoButtonColor = false, ZIndex = 3, Parent = r.Frame })
-    local back = Slice(b, "tab_fill.png", S_TAB, { Size = UDim2.fromScale(1, 1), ImageColor3 = rgb(0, 0, 0), ImageTransparency = 0.35, ZIndex = 3 })
-    local fill = Slice(b, "tab_fill.png", S_TAB, { Size = UDim2.fromScale(1, 1), ImageTransparency = 1, ZIndex = 3 })
-    Slice(b, "tab_frame.png", S_TAB, { Size = UDim2.fromScale(1, 1), ZIndex = 4 })
-    Text(b, o.Title or "Button", 12, Theme.Text, FW.Medium, { Size = UDim2.fromScale(1, 1), TextXAlignment = Enum.TextXAlignment.Center, ZIndex = 5 })
-    OnTheme(function() fill.ImageColor3 = Accent() end)
-    b.MouseEnter:Connect(function() Tween(fill, 0.2, { ImageTransparency = 0.7 }) end)
-    b.MouseLeave:Connect(function() Tween(fill, 0.2, { ImageTransparency = 1 }) end)
+    local g = Gem(b, "tab", S_TAB, { Size = UDim2.fromScale(1, 1), ZIndex = 3 })
+    local lbl = Text(b, o.Title or "Button", 12, Theme.Text, FW.Bold, { Size = UDim2.fromScale(1, 1), TextXAlignment = Enum.TextXAlignment.Center, ZIndex = 5 })
+    New("UIStroke", { Color = rgb(0, 0, 0), Transparency = 0.6, Thickness = 1, Parent = lbl })
+    local hover = false
+    OnTheme(function() GemLook(g, hover and "hover" or "off", true) end)
+    b.MouseEnter:Connect(function() hover = true; GemLook(g, "hover") end)
+    b.MouseLeave:Connect(function() hover = false; GemLook(g, "off") end)
     b.MouseButton1Click:Connect(function()
-        fill.ImageTransparency = 0.2
-        Tween(fill, 0.4, { ImageTransparency = 0.7 })
+        GemLook(g, "on", true)
+        task.delay(0.12, function() GemLook(g, hover and "hover" or "off") end)
         SafeCall(o.Callback)
     end)
     return r
@@ -858,13 +898,15 @@ function Window:_ColorPopup(anchor, color, onChange, owner)
     local scale = self.Scale.Scale
     local ap, as = self:_Rel(anchor), anchor.AbsoluteSize
     local PW, PH = 178, 198
-    local x = ap.X + as.X - PW * scale
-    local y = ap.Y + as.Y + 6 * scale
+    local x = ap.X + as.X / 2 - PW / 2 * scale
+    local ov = self.Overlay.AbsoluteSize
+    x = math.clamp(x, 4, math.max(4, ov.X - PW * scale - 4))
+    local y = ap.Y + as.Y + 3 * scale
     local pop = New("CanvasGroup", { Position = UDim2.fromOffset(x, y), Size = UDim2.fromOffset(PW, PH), BackgroundColor3 = rgb(8, 8, 10), BackgroundTransparency = 0.04,
         GroupTransparency = 1, ZIndex = 5, Parent = self.Overlay })
     local sc = New("UIScale", { Scale = scale * 0.92, Parent = pop })
     Corner(pop, 8)
-    Slice(pop, "panel_frame.png", S_PANEL, { Size = UDim2.fromScale(1, 1), ZIndex = 9 })
+    Slice(pop, "panel_rim.png", S_PANEL, { Size = UDim2.fromScale(1, 1), ZIndex = 9 })
     local h, s, v = color:ToHSV()
     local sv = New("TextButton", { Position = UDim2.fromOffset(12, 12), Size = UDim2.fromOffset(126, 126), Text = "", AutoButtonColor = false, ZIndex = 6, Parent = pop })
     local wh = New("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = rgb(255, 255, 255), ZIndex = 6, Parent = sv })
@@ -885,7 +927,7 @@ function Window:_ColorPopup(anchor, color, onChange, owner)
     Text(pop, "HEX", 9, Theme.Sub, FW.Medium, { Position = UDim2.fromOffset(50, 146), Size = UDim2.fromOffset(24, 18), ZIndex = 6 })
     local hexF = New("Frame", { Position = UDim2.fromOffset(76, 146), Size = UDim2.fromOffset(88, 18), BackgroundColor3 = rgb(0, 0, 0), BackgroundTransparency = 0.3, ZIndex = 6, Parent = pop })
     Corner(hexF, 5)
-    Slice(hexF, "field_frame.png", S_FIELD, { Size = UDim2.fromScale(1, 1), ZIndex = 8 })
+    Slice(hexF, "field_rim.png", S_FIELD, { Size = UDim2.fromScale(1, 1), ZIndex = 8 })
     Text(hexF, "#", 9, Theme.Sub, FW.Medium, { Position = UDim2.fromOffset(7, 0), Size = UDim2.fromOffset(10, 18), ZIndex = 7 })
     local hexBox = New("TextBox", { BackgroundTransparency = 1, Position = UDim2.fromOffset(18, 0), Size = UDim2.new(1, -22, 1, 0), FontFace = Font.new(FONT, FW.Medium), TextSize = 10,
         TextColor3 = Theme.Text, Text = "", TextXAlignment = Enum.TextXAlignment.Left, ClearTextOnFocus = false, ZIndex = 7, Parent = hexF })
